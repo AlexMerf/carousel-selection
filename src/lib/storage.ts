@@ -1,79 +1,18 @@
-import { createEmptyState, DEFAULT_LIST, STATE_VERSION } from "@/lib/items";
-import type { AppState, Item, ItemStatus, ItemType } from "@/types";
+import { createEmptyState } from "@/lib/items";
+import { migrateState } from "@/lib/migrate";
+import type { AppState } from "@/types";
 
+/** Key stays `kinokoltso.v1` on purpose: renaming it would orphan everyone's data. */
 const STORAGE_KEY = "kinokoltso.v1";
 
-const TYPES: ItemType[] = ["film", "series", "anime"];
-const STATUSES: ItemStatus[] = ["pool", "watching", "watched", "dropped", "hidden"];
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function asItem(value: unknown): Item | null {
-  const record = asRecord(value);
-  if (!record) return null;
-
-  const title = typeof record.title === "string" ? record.title.trim() : "";
-  if (!title) return null;
-
-  const type = TYPES.includes(record.type as ItemType) ? (record.type as ItemType) : "film";
-  const status = STATUSES.includes(record.status as ItemStatus)
-    ? (record.status as ItemStatus)
-    : "pool";
-
-  const createdAt = typeof record.createdAt === "number" ? record.createdAt : Date.now();
-  const statusChangedAt =
-    typeof record.statusChangedAt === "number" ? record.statusChangedAt : createdAt;
-
-  const posterUrl =
-    typeof record.posterUrl === "string" && record.posterUrl.trim().length > 0
-      ? record.posterUrl.trim()
-      : undefined;
-
-  return {
-    id: typeof record.id === "string" && record.id ? record.id : crypto.randomUUID(),
-    title,
-    type,
-    posterUrl,
-    status,
-    createdAt,
-    statusChangedAt,
-  };
-}
-
-export function normalizeState(value: unknown): AppState | null {
-  const record = asRecord(value);
-  if (!record) return null;
-
-  const rawItems = Array.isArray(record.items) ? record.items : [];
-  const items = rawItems.map(asItem).filter((item): item is Item => item !== null);
-
-  const settings = asRecord(record.settings);
-  const sound = typeof settings?.sound === "boolean" ? settings.sound : true;
-  const omdbKey =
-    typeof settings?.omdbKey === "string" && settings.omdbKey.trim().length > 0
-      ? settings.omdbKey.trim()
-      : undefined;
-  const activeList = TYPES.includes(settings?.activeList as ItemType)
-    ? (settings?.activeList as ItemType)
-    : DEFAULT_LIST;
-
-  return {
-    version: STATE_VERSION,
-    items,
-    settings: { sound, omdbKey, activeList },
-    lastWinnerId: typeof record.lastWinnerId === "string" ? record.lastWinnerId : null,
-  };
-}
+export { migrateState };
 
 export function loadState(): AppState {
   if (typeof window === "undefined") return createEmptyState();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return createEmptyState();
-    return normalizeState(JSON.parse(raw)) ?? createEmptyState();
+    return migrateState(JSON.parse(raw)) ?? createEmptyState();
   } catch {
     return createEmptyState();
   }
@@ -109,7 +48,7 @@ export function readStateFile(file: File): Promise<AppState> {
     reader.onload = () => {
       try {
         const parsed: unknown = JSON.parse(String(reader.result));
-        const state = normalizeState(parsed);
+        const state = migrateState(parsed);
         if (!state) reject(new Error("Файл не похож на резервную копию «Саша + Лера»"));
         else resolve(state);
       } catch {

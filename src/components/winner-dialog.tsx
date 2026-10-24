@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatDate, TYPE_BADGE, TYPE_LABEL } from "@/lib/items";
+import { seasonBadge } from "@/lib/seasons";
 import { cn } from "@/lib/utils";
 import type { Item } from "@/types";
 
@@ -92,6 +93,8 @@ export function WinnerDialog({
   onNever,
 }: WinnerDialogProps) {
   const [open, setOpen] = useState(false);
+  const badge = item ? seasonBadge(item) : null;
+  const watchLabel = badge ? `Смотрю ${badge.split("/")[0]}` : "Смотрю";
 
   // Open one frame later so the dialog is not part of the same commit as the
   // winner landing — the content gets a clean layout to measure against.
@@ -166,13 +169,18 @@ export function WinnerDialog({
               <Badge variant="outline" className={cn(TYPE_BADGE[item.type])}>
                 {TYPE_LABEL[item.type]}
               </Badge>
+              {badge ? (
+                <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-px text-[10px]">
+                  {badge}
+                </span>
+              ) : null}
               <span>В пуле с {formatDate(item.createdAt)}</span>
             </div>
 
             <div className="mt-5 space-y-2">
               <Button onClick={onWatch} className="h-11 w-full">
                 <Check className="size-4" />
-                Смотрю
+                {watchLabel}
               </Button>
               <div className="grid grid-cols-2 gap-2">
                 <Button variant="secondary" onClick={onLater} className="h-10">

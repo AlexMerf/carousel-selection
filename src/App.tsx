@@ -11,10 +11,18 @@ import { SpinScreen } from "@/components/spin-screen";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { countByType, createEmptyState, EXAMPLE_ITEMS, TYPE_LABEL, uid } from "@/lib/items";
+import {
+  countByType,
+  countWatchableByType,
+  createEmptyState,
+  EXAMPLE_ITEMS,
+  TYPE_LABEL,
+  uid,
+} from "@/lib/items";
+import * as seasons from "@/lib/seasons";
 import { sound } from "@/lib/sound";
 import { exportStateFile, loadState, readStateFile, saveState } from "@/lib/storage";
-import type { AppState, Item, ItemStatus, ItemType, TabId } from "@/types";
+import type { AppState, Item, ItemList, ItemType, TabId } from "@/types";
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState());
@@ -33,12 +41,9 @@ export default function App() {
     sound.enabled = state.settings.sound;
   }, [state.settings.sound]);
 
-  const pool = useMemo(() => state.items.filter((item) => item.status === "pool"), [state.items]);
-  const history = useMemo(
-    () => state.items.filter((item) => item.status !== "pool" && item.status !== "hidden"),
-    [state.items],
-  );
-  const hidden = useMemo(() => state.items.filter((item) => item.status === "hidden"), [state.items]);
+  const pool = useMemo(() => state.items.filter((item) => item.list === "pool"), [state.items]);
+  const history = useMemo(() => state.items.filter((item) => item.list === "history"), [state.items]);
+  const hidden = useMemo(() => state.items.filter((item) => item.list === "hidden"), [state.items]);
 
   /** The list the wheel spins and the pool tab shows — persisted with the rest of settings. */
   const activeList = state.settings.activeList;
@@ -47,9 +52,16 @@ export default function App() {
     [pool, activeList],
   );
   const counts = useMemo(() => countByType(pool), [pool]);
+  const wheelCounts = useMemo(() => countWatchableByType(pool), [pool]);
 
   const setActiveList = (type: ItemType) =>
     setState((prev) => ({ ...prev, settings: { ...prev.settings, activeList: type } }));
+
+  const applyItem = (id: string, transform: (item: Item) => Item) =>
+    setState((prev) => ({
+      ...prev,
+      items: prev.items.map((item) => (item.id === id ? transform(item) : item)),
+    }));
 
   const addItem = (values: ItemFormValues) => {
     const now = Date.now();
@@ -58,7 +70,8 @@ export default function App() {
       title: values.title,
       type: values.type,
       posterUrl: values.posterUrl,
-      status: "pool",
+      list: "pool",
+      seasons: values.seasons,
       createdAt: now,
       statusChangedAt: now,
     };
@@ -74,16 +87,20 @@ export default function App() {
   const updateItem = (id: string, values: ItemFormValues) => {
     setState((prev) => ({
       ...prev,
-      items: prev.items.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              title: values.title,
-              type: values.type,
-              posterUrl: values.posterUrl,
-            }
-          : item,
-      ),
+      items: prev.items.map((item) => {
+        if (item.id !== id) return item;
+        const nextSeasons = seasons.normalizeSeasons(values.type, values.seasons);
+        const latest = nextSeasons.reduce((max, season) => Math.max(max, season.changedAt), 0);
+        return {
+          ...item,
+          title: values.title,
+          type: values.type,
+          posterUrl: values.posterUrl,
+          seasons: nextSeasons,
+          // History sorts by the newest season change, not by the edit itself.
+          statusChangedAt: Math.max(item.statusChangedAt, latest),
+        };
+      }),
       // A retyped position moves between lists; follow it so it stays visible.
       settings: { ...prev.settings, activeList: values.type },
     }));
@@ -98,23 +115,42 @@ export default function App() {
     }));
   };
 
-  const setStatus = (id: string, status: ItemStatus) => {
-    setState((prev) => ({
-      ...prev,
-      items: prev.items.map((item) =>
-        item.id === id ? { ...item, status, statusChangedAt: Date.now() } : item,
-      ),
-    }));
-  };
+  const moveToList = (id: string, list: ItemList) =>
+    applyItem(id, (item) => seasons.moveToList(item, list));
 
   const recordWinner = (item: Item) => {
     setState((prev) => ({ ...prev, lastWinnerId: item.id }));
   };
 
-  /** "We already saw this one" — straight to history as watched, no spin needed. */
+  /** «Смотрю» — the current season starts playing, the title moves to history. */
+  const startWatching = (item: Item) => {
+    const index = seasons.currentSeasonIndex(item);
+    applyItem(item.id, (current) => seasons.startWatching(current));
+    toast.success(
+      index >= 0 ? `«${item.title}» — S${index + 1} в истории` : `«${item.title}» — в истории`,
+    );
+  };
+
+  /** «Уже смотрел» — every released season is watched, no spin needed. */
   const markWatched = (item: Item) => {
-    setStatus(item.id, "watched");
+    applyItem(item.id, (current) => seasons.markAllWatched(current));
     toast.success(`«${item.title}» — просмотрено, записал в историю`);
+  };
+
+  const dropShow = (item: Item) => {
+    applyItem(item.id, (current) => seasons.dropSeason(current));
+    toast(`«${item.title}» — брошено, лежит в истории`);
+  };
+
+  const hideItem = (item: Item) => {
+    moveToList(item.id, "hidden");
+    toast(`«${item.title}» — в скрытых, вернуть можно там`);
+  };
+
+  const returnToPool = (id: string) => {
+    const item = state.items.find((entry) => entry.id === id);
+    moveToList(id, "pool");
+    if (item) toast(`«${item.title}» — снова в пуле`);
   };
 
   const addExamples = (list?: ItemType) => {
@@ -124,7 +160,8 @@ export default function App() {
       id: uid(),
       title: example.title,
       type: example.type,
-      status: "pool",
+      list: "pool",
+      seasons: seasons.createSeasons(1, "not_started", now + index),
       createdAt: now + index,
       statusChangedAt: now + index,
     }));
@@ -244,12 +281,15 @@ export default function App() {
             <SpinScreen
               pool={pool}
               activeList={activeList}
+              counts={wheelCounts}
               onListChange={setActiveList}
               lastWinnerId={state.lastWinnerId}
               onSpun={recordWinner}
-              onStatus={setStatus}
+              onWatch={startWatching}
+              onNever={hideItem}
               onAddClick={openAddDialog}
               onAddExamples={addExamples}
+              onOpenPool={() => setTab("pool")}
             />
           </TabsContent>
 
@@ -263,18 +303,26 @@ export default function App() {
               onAddExamples={addExamples}
               onEdit={openEditDialog}
               onDelete={removeItem}
-              onHide={(id) => setStatus(id, "hidden")}
+              onHide={hideItem}
               onMarkWatched={markWatched}
               onFindPoster={openPosterSearch}
             />
           </TabsContent>
 
           <TabsContent value="history">
-            <HistoryView items={history} onStatus={setStatus} onDelete={removeItem} />
+            <HistoryView
+              items={history}
+              onStartWatching={startWatching}
+              onMarkAllWatched={markWatched}
+              onDrop={dropShow}
+              onReturnToPool={returnToPool}
+              onEdit={openEditDialog}
+              onDelete={removeItem}
+            />
           </TabsContent>
 
           <TabsContent value="hidden">
-            <HiddenView items={hidden} onRestore={(id) => setStatus(id, "pool")} onDelete={removeItem} />
+            <HiddenView items={hidden} onRestore={returnToPool} onDelete={removeItem} />
           </TabsContent>
         </main>
       </Tabs>

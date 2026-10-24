@@ -1,34 +1,40 @@
 import { useCallback, useMemo, useState } from "react";
 import { Plus, Shuffle, Sparkles } from "lucide-react";
-import { toast } from "sonner";
 
 import { ListSwitcher } from "@/components/list-switcher";
 import { Button } from "@/components/ui/button";
 import { WheelStage } from "@/components/wheel-stage";
 import { WinnerDialog } from "@/components/winner-dialog";
-import { countByType, nextListWithItems, pickWinner, TYPE_LABEL } from "@/lib/items";
-import type { Item, ItemStatus, ItemType } from "@/types";
+import { nextListWithItems, pickWinner, TYPE_LABEL } from "@/lib/items";
+import { isWatchable } from "@/lib/seasons";
+import type { Item, ItemType } from "@/types";
 
 interface SpinScreenProps {
   pool: Item[];
   activeList: ItemType;
+  counts: Record<ItemType, number>;
   onListChange: (type: ItemType) => void;
   lastWinnerId: string | null;
   onSpun: (item: Item) => void;
-  onStatus: (id: string, status: ItemStatus) => void;
+  onWatch: (item: Item) => void;
+  onNever: (item: Item) => void;
   onAddClick: (list: ItemType) => void;
   onAddExamples: (list?: ItemType) => void;
+  onOpenPool: () => void;
 }
 
 export function SpinScreen({
   pool,
   activeList,
+  counts,
   onListChange,
   lastWinnerId,
   onSpun,
-  onStatus,
+  onWatch,
+  onNever,
   onAddClick,
   onAddExamples,
+  onOpenPool,
 }: SpinScreenProps) {
   const [spinToken, setSpinToken] = useState(0);
   const [spinning, setSpinning] = useState(false);
@@ -36,11 +42,12 @@ export function SpinScreen({
   /** On-screen box of the winning card, handed to the dialog so it can morph. */
   const [originRect, setOriginRect] = useState<DOMRect | null>(null);
 
-  const counts = useMemo(() => countByType(pool), [pool]);
-  const candidates = useMemo(
+  const listItems = useMemo(
     () => pool.filter((item) => item.type === activeList),
     [pool, activeList],
   );
+  /** Only titles with something left to watch take part in the spin. */
+  const candidates = useMemo(() => listItems.filter(isWatchable), [listItems]);
   const otherList = useMemo(() => nextListWithItems(pool, activeList), [pool, activeList]);
   const pick = useCallback(() => pickWinner(candidates, lastWinnerId), [candidates, lastWinnerId]);
 
@@ -63,6 +70,9 @@ export function SpinScreen({
     setWinner(item);
     onSpun(item);
   };
+
+  /** The active list has entries, but every released season is already closed. */
+  const nothingToWatch = candidates.length === 0 && listItems.length > 0;
 
   return (
     <div className="mx-auto flex w-full max-w-[420px] flex-col gap-4">
@@ -95,9 +105,13 @@ export function SpinScreen({
             <Sparkles className="size-5" />
           </div>
           <div className="space-y-1">
-            <p className="font-medium">В списке «{TYPE_LABEL[activeList]}» пусто</p>
+            <p className="font-medium">
+              {nothingToWatch ? "Нет сезонов для просмотра" : `В списке «${TYPE_LABEL[activeList]}» пусто`}
+            </p>
             <p className="text-sm text-muted-foreground">
-              Кольцо крутит только по активному списку. Добавь позиции сюда — или переключись на другой.
+              {nothingToWatch
+                ? `Всё вышедшее в «${TYPE_LABEL[activeList]}» уже просмотрено. Добавь новый сезон в «Изменить» или добавь позицию.`
+                : "Кольцо крутит только по активному списку. Добавь позиции сюда — или переключись на другой."}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2">
@@ -105,7 +119,11 @@ export function SpinScreen({
               <Plus className="size-4" />
               Добавить в список
             </Button>
-            {otherList ? (
+            {nothingToWatch ? (
+              <Button variant="secondary" onClick={onOpenPool} className="h-10 w-full">
+                Открыть Пул
+              </Button>
+            ) : otherList ? (
               <Button
                 variant="secondary"
                 onClick={() => changeList(otherList)}
@@ -147,18 +165,13 @@ export function SpinScreen({
         onDismiss={() => setWinner(null)}
         onWatch={() => {
           if (!winner) return;
-          onStatus(winner.id, "watching");
-          toast.success(`«${winner.title}» — в истории. Приятного просмотра`);
+          onWatch(winner);
           setWinner(null);
         }}
-        onLater={() => {
-          toast("Остаётся в пуле — крути ещё");
-          setWinner(null);
-        }}
+        onLater={() => setWinner(null)}
         onNever={() => {
           if (!winner) return;
-          onStatus(winner.id, "hidden");
-          toast(`«${winner.title}» — в скрытых, вернуть можно там`);
+          onNever(winner);
           setWinner(null);
         }}
       />

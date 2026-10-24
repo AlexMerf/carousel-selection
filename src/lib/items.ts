@@ -1,4 +1,5 @@
-import type { AppState, Item, ItemStatus, ItemType } from "@/types";
+import { isWatchable } from "@/lib/seasons";
+import type { AppState, Item, ItemType } from "@/types";
 
 export const ITEM_TYPES: ItemType[] = ["film", "series", "anime"];
 
@@ -29,16 +30,6 @@ export const TYPE_GRADIENT: Record<ItemType, string> = {
   anime: "from-violet-500/35 via-violet-500/10 to-transparent",
 };
 
-export const STATUS_LABEL: Record<ItemStatus, string> = {
-  pool: "В пуле",
-  watching: "Смотрю",
-  watched: "Досмотрел",
-  dropped: "Бросил",
-  hidden: "Скрыт",
-};
-
-export const HISTORY_STATUSES: ItemStatus[] = ["watching", "watched", "dropped"];
-
 export function uid(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -46,14 +37,17 @@ export function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function isHistoryItem(item: Item): boolean {
-  return item.status === "watching" || item.status === "watched" || item.status === "dropped";
-}
-
 /** How many pool entries each list holds — drives the switcher counters. */
 export function countByType(items: Item[]): Record<ItemType, number> {
   const counts: Record<ItemType, number> = { film: 0, series: 0, anime: 0 };
   for (const item of items) counts[item.type] += 1;
+  return counts;
+}
+
+/** Same counters, but only what the wheel can actually land on. */
+export function countWatchableByType(items: Item[]): Record<ItemType, number> {
+  const counts: Record<ItemType, number> = { film: 0, series: 0, anime: 0 };
+  for (const item of items) if (isWatchable(item)) counts[item.type] += 1;
   return counts;
 }
 
@@ -101,7 +95,7 @@ export function posterFallbackInitials(title: string): string {
   return `${words[0]![0] ?? ""}${words[1]![0] ?? ""}`.toUpperCase();
 }
 
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 
 export const EXAMPLE_ITEMS: Array<Pick<Item, "title" | "type">> = [
   { title: "Криминальное чтиво", type: "film" },

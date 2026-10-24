@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatDate, TYPE_LABEL } from "@/lib/items";
+import { isWatchable, seasonBadge } from "@/lib/seasons";
 import type { Item, ItemType } from "@/types";
 
 interface PoolViewProps {
@@ -41,7 +42,7 @@ interface PoolViewProps {
   onAddExamples: () => void;
   onEdit: (item: Item) => void;
   onDelete: (id: string) => void;
-  onHide: (id: string) => void;
+  onHide: (item: Item) => void;
   onMarkWatched: (item: Item) => void;
   onFindPoster: (item: Item) => void;
 }
@@ -99,52 +100,69 @@ export function PoolView({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {items.map((item) => (
-            <ItemRow
-              key={item.id}
-              item={item}
-              meta={
-                <span className="text-[11px] text-muted-foreground">
-                  добавлено {formatDate(item.createdAt)}
-                </span>
-              }
-            >
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="shrink-0 text-muted-foreground"
-                    aria-label={`Действия: ${item.title}`}
-                  >
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => onEdit(item)}>
-                    <Pencil className="size-4" />
-                    Изменить
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onFindPoster(item)}>
-                    <ImageDown className="size-4" />
-                    Найти постер
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onMarkWatched(item)}>
-                    <CheckCheck className="size-4" />
-                    Уже смотрел
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onHide(item.id)}>
-                    <EyeOff className="size-4" />
-                    В скрытые
-                  </DropdownMenuItem>
-                  <DropdownMenuItem variant="destructive" onClick={() => setPendingDelete(item)}>
-                    <Trash2 className="size-4" />
-                    Удалить
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </ItemRow>
-          ))}
+          {items.map((item) => {
+            const badge = seasonBadge(item);
+            const watchable = isWatchable(item);
+
+            return (
+              <ItemRow
+                key={item.id}
+                item={item}
+                meta={
+                  <>
+                    {badge ? (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-px text-[10px] text-muted-foreground">
+                        {badge}
+                      </span>
+                    ) : null}
+                    {!watchable ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        всё вышедшее просмотрено — в кольце не участвует
+                      </span>
+                    ) : null}
+                    <span className="text-[11px] text-muted-foreground">
+                      добавлено {formatDate(item.createdAt)}
+                    </span>
+                  </>
+                }
+              >
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-muted-foreground"
+                      aria-label={`Действия: ${item.title}`}
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => onEdit(item)}>
+                      <Pencil className="size-4" />
+                      Изменить
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onFindPoster(item)}>
+                      <ImageDown className="size-4" />
+                      Найти постер
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onMarkWatched(item)}>
+                      <CheckCheck className="size-4" />
+                      Уже смотрел
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onHide(item)}>
+                      <EyeOff className="size-4" />
+                      В скрытые
+                    </DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onClick={() => setPendingDelete(item)}>
+                      <Trash2 className="size-4" />
+                      Удалить
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </ItemRow>
+            );
+          })}
         </div>
       )}
 
@@ -158,7 +176,8 @@ export function PoolView({
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить «{pendingDelete?.title}»?</AlertDialogTitle>
             <AlertDialogDescription>
-              Позиция исчезнет из пула и из истории. Вернуть её будет нельзя.
+              Позиция исчезнет из пула и из истории вместе с отметками по сезонам. Вернуть её будет
+              нельзя.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
