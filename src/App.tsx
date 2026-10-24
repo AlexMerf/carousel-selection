@@ -309,7 +309,8 @@ export default function App() {
         totals={{ pool: pool.length, history: history.length, hidden: hidden.length }}
       />
 
-      <Toaster position="top-center" richColors closeButton />
+      {/* Bottom-right so toasts never cover the header/wheel controls on top. */}
+      <Toaster position="bottom-right" richColors closeButton />
     </div>
   );
 }
