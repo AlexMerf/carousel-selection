@@ -52,11 +52,15 @@ export function normalizeState(value: unknown): AppState | null {
 
   const settings = asRecord(record.settings);
   const sound = typeof settings?.sound === "boolean" ? settings.sound : true;
+  const omdbKey =
+    typeof settings?.omdbKey === "string" && settings.omdbKey.trim().length > 0
+      ? settings.omdbKey.trim()
+      : undefined;
 
   return {
     version: STATE_VERSION,
     items,
-    settings: { sound },
+    settings: { sound, omdbKey },
     lastWinnerId: typeof record.lastWinnerId === "string" ? record.lastWinnerId : null,
   };
 }

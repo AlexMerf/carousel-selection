@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { ImageDown } from "lucide-react";
 
+import { PosterFinder } from "@/components/poster-finder";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,20 +34,31 @@ interface ItemDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   item?: Item | null;
+  omdbKey?: string;
+  finderInitiallyOpen?: boolean;
   onSubmit: (values: ItemFormValues) => void;
 }
 
-export function ItemDialog({ open, onOpenChange, item, onSubmit }: ItemDialogProps) {
+export function ItemDialog({
+  open,
+  onOpenChange,
+  item,
+  omdbKey,
+  finderInitiallyOpen,
+  onSubmit,
+}: ItemDialogProps) {
   const [title, setTitle] = useState("");
   const [type, setType] = useState<ItemType>("film");
   const [posterUrl, setPosterUrl] = useState("");
+  const [finderOpen, setFinderOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setTitle(item?.title ?? "");
     setType(item?.type ?? "film");
     setPosterUrl(item?.posterUrl ?? "");
-  }, [open, item]);
+    setFinderOpen(Boolean(finderInitiallyOpen));
+  }, [open, item, finderInitiallyOpen]);
 
   const trimmedTitle = title.trim();
   const canSubmit = trimmedTitle.length > 0;
@@ -63,13 +76,13 @@ export function ItemDialog({ open, onOpenChange, item, onSubmit }: ItemDialogPro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{item ? "Изменить позицию" : "Новая позиция"}</DialogTitle>
           <DialogDescription>
             {item
-              ? "Поправь название, тип или ссылку на постер."
-              : "Название и тип обязательны, постер — по желанию."}
+              ? "Поправь название, тип или постер."
+              : "Название и тип обязательны, постер можно подобрать автоматически."}
           </DialogDescription>
         </DialogHeader>
 
@@ -103,7 +116,20 @@ export function ItemDialog({ open, onOpenChange, item, onSubmit }: ItemDialogPro
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="item-poster">Ссылка на постер</Label>
+            <div className="flex items-end justify-between gap-2">
+              <Label htmlFor="item-poster">Ссылка на постер</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 px-2 text-xs text-primary hover:text-primary"
+                onClick={() => setFinderOpen((value) => !value)}
+                disabled={!trimmedTitle}
+              >
+                <ImageDown className="size-3.5" />
+                {finderOpen ? "Скрыть поиск" : "Найти постер"}
+              </Button>
+            </div>
             <Input
               id="item-poster"
               value={posterUrl}
@@ -113,9 +139,21 @@ export function ItemDialog({ open, onOpenChange, item, onSubmit }: ItemDialogPro
               autoComplete="off"
             />
             <p className="text-xs text-muted-foreground">
-              Можно вставить ссылку на картинку. Без неё будет аккуратная заглушка.
+              Можно вставить ссылку или подобрать автоматически. Без постера будет заглушка.
             </p>
           </div>
+
+          {finderOpen ? (
+            <PosterFinder
+              query={trimmedTitle}
+              type={type}
+              omdbKey={omdbKey}
+              onPick={(candidate) => {
+                setPosterUrl(candidate.imageUrl);
+                setFinderOpen(false);
+              }}
+            />
+          ) : null}
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { EyeOff, MoreHorizontal, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { EyeOff, ImageDown, MoreHorizontal, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { ItemRow } from "@/components/item-row";
 import {
@@ -29,6 +29,7 @@ interface PoolViewProps {
   onEdit: (item: Item) => void;
   onDelete: (id: string) => void;
   onHide: (id: string) => void;
+  onFindPoster: (item: Item) => void;
 }
 
 export function PoolView({
@@ -38,6 +39,7 @@ export function PoolView({
   onEdit,
   onDelete,
   onHide,
+  onFindPoster,
 }: PoolViewProps) {
   const [pendingDelete, setPendingDelete] = useState<Item | null>(null);
 
@@ -101,6 +103,10 @@ export function PoolView({
                   <DropdownMenuItem onClick={() => onEdit(item)}>
                     <Pencil className="size-4" />
                     Изменить
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onFindPoster(item)}>
+                    <ImageDown className="size-4" />
+                    Найти постер
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onHide(item.id)}>
                     <EyeOff className="size-4" />

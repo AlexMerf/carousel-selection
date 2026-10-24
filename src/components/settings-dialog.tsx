@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
 interface SettingsDialogProps {
@@ -27,6 +28,8 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
   soundEnabled: boolean;
   onSoundChange: (value: boolean) => void;
+  omdbKey?: string;
+  onOmdbKeyChange: (value: string) => void;
   onExport: () => void;
   onImportFile: (file: File) => void;
   onClearAll: () => void;
@@ -38,6 +41,8 @@ export function SettingsDialog({
   onOpenChange,
   soundEnabled,
   onSoundChange,
+  omdbKey,
+  onOmdbKeyChange,
   onExport,
   onImportFile,
   onClearAll,
@@ -62,6 +67,34 @@ export function SettingsDialog({
             <p className="text-xs text-muted-foreground">Тиканье колеса и звук на остановке</p>
           </div>
           <Switch checked={soundEnabled} onCheckedChange={onSoundChange} aria-label="Звук" />
+        </div>
+
+        <div className="space-y-2 rounded-xl border border-white/10 bg-card/50 px-3 py-3">
+          <div>
+            <p className="text-sm font-medium">Ключ OMDb</p>
+            <p className="text-xs text-muted-foreground">
+              Пригодится для постеров по английским названиям.{" "}
+              <a
+                href="https://www.omdbapi.com/apikey.aspx"
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                Получить бесплатный ключ
+              </a>
+            </p>
+          </div>
+          <Input
+            value={omdbKey ?? ""}
+            onChange={(event) => onOmdbKeyChange(event.target.value)}
+            placeholder="8-символьный ключ"
+            autoComplete="off"
+            spellCheck={false}
+            className="h-9"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Хранится только в этом браузере. Без ключа постеры ищутся в Википедии и AniList.
+          </p>
         </div>
 
         <Separator />

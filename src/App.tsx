@@ -22,6 +22,7 @@ export default function App() {
   const [types, setTypes] = useState<Set<ItemType>>(() => new Set(ITEM_TYPES));
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [finderInitiallyOpen, setFinderInitiallyOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
@@ -133,11 +134,19 @@ export default function App() {
 
   const openAddDialog = () => {
     setEditingItem(null);
+    setFinderInitiallyOpen(false);
     setItemDialogOpen(true);
   };
 
   const openEditDialog = (item: Item) => {
     setEditingItem(item);
+    setFinderInitiallyOpen(false);
+    setItemDialogOpen(true);
+  };
+
+  const openPosterSearch = (item: Item) => {
+    setEditingItem(item);
+    setFinderInitiallyOpen(true);
     setItemDialogOpen(true);
   };
 
@@ -225,6 +234,7 @@ export default function App() {
               onEdit={openEditDialog}
               onDelete={removeItem}
               onHide={(id) => setStatus(id, "hidden")}
+              onFindPoster={openPosterSearch}
             />
           </TabsContent>
 
@@ -242,6 +252,8 @@ export default function App() {
         open={itemDialogOpen}
         onOpenChange={setItemDialogOpen}
         item={editingItem}
+        omdbKey={state.settings.omdbKey}
+        finderInitiallyOpen={finderInitiallyOpen}
         onSubmit={(values) => {
           if (editingItem) updateItem(editingItem.id, values);
           else addItem(values);
@@ -254,6 +266,10 @@ export default function App() {
         soundEnabled={state.settings.sound}
         onSoundChange={(value) =>
           setState((prev) => ({ ...prev, settings: { ...prev.settings, sound: value } }))
+        }
+        omdbKey={state.settings.omdbKey}
+        onOmdbKeyChange={(value) =>
+          setState((prev) => ({ ...prev, settings: { ...prev.settings, omdbKey: value } }))
         }
         onExport={() => exportStateFile(state)}
         onImportFile={handleImport}

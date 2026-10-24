@@ -14,6 +14,7 @@ export interface Item {
 
 export interface Settings {
   sound: boolean;
+  omdbKey?: string;
 }
 
 export interface AppState {
