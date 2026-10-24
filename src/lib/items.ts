@@ -96,7 +96,7 @@ export const EXAMPLE_ITEMS: Array<Pick<Item, "title" | "type">> = [
   { title: "Очень странные дела", type: "series" },
   { title: "Атака титанов", type: "anime" },
   { title: "Интерстеллар", type: "film" },
-  { title: "Тёмное зеркало", type: "series" },
+  { title: "Чёрное зеркало", type: "series" },
   { title: "Тетрадь смерти", type: "anime" },
 ];
 

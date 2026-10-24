@@ -118,6 +118,12 @@ export function PosterFinder({ query, type, omdbKey, onPick }: PosterFinderProps
         </p>
       ) : null}
 
+      {report && report.candidates.length > 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          Не то? Вбей оригинальное название — например, «Pulp Fiction» или «Stranger Things».
+        </p>
+      ) : null}
+
       {report && report.errors.length > 0 ? (
         <p className={cn("text-[11px] text-muted-foreground")}>{report.errors.join(" · ")}</p>
       ) : null}
