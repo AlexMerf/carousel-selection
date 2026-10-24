@@ -151,8 +151,10 @@ function Ring({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
     [runAnimation],
   );
 
+  const lastTokenRef = useRef(spinToken);
   useEffect(() => {
-    if (spinToken > 0) spin();
+    if (spinToken !== lastTokenRef.current && spinToken > 0) spin();
+    lastTokenRef.current = spinToken;
   }, [spinToken, spin]);
 
   const angleFromCenter = (clientX: number, clientY: number, center: { x: number; y: number }) =>
@@ -375,8 +377,10 @@ function Reel({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const lastTokenRef = useRef(spinToken);
   useEffect(() => {
-    if (spinToken > 0) spin();
+    if (spinToken !== lastTokenRef.current && spinToken > 0) spin();
+    lastTokenRef.current = spinToken;
   }, [spinToken, spin]);
 
   return (
