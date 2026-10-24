@@ -1,0 +1,122 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 6px);
+  --radius-2xl: calc(var(--radius) + 14px);
+}
+
+:root {
+  --radius: 0.9rem;
+
+  --background: oklch(0.145 0.005 285);
+  --foreground: oklch(0.97 0.002 285);
+  --card: oklch(0.19 0.006 285);
+  --card-foreground: oklch(0.97 0.002 285);
+  --popover: oklch(0.19 0.006 285);
+  --popover-foreground: oklch(0.97 0.002 285);
+  --primary: oklch(0.83 0.16 84);
+  --primary-foreground: oklch(0.22 0.04 70);
+  --secondary: oklch(0.27 0.006 285);
+  --secondary-foreground: oklch(0.97 0.002 285);
+  --muted: oklch(0.26 0.005 285);
+  --muted-foreground: oklch(0.71 0.008 285);
+  --accent: oklch(0.28 0.01 84);
+  --accent-foreground: oklch(0.97 0.002 285);
+  --destructive: oklch(0.63 0.19 25);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.83 0.16 84 / 55%);
+
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family:
+      "Inter",
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior-y: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .ring-stage {
+    perspective: 1400px;
+  }
+}
+
+/* Ambient glow behind the wheel — pure decoration, no interaction. */
+.wheel-glow {
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in oklch, var(--primary) 18%, transparent) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      circle at 50% 100%,
+      color-mix(in oklch, var(--primary) 8%, transparent) 0%,
+      transparent 70%
+    );
+}
