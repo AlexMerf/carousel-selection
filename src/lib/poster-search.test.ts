@@ -266,6 +266,23 @@ describe("findPosters", () => {
     );
   });
 
+  it("still finds the poster when the list type disagrees with the article", async () => {
+    stubFetch((url) => {
+      if (url.hostname === "ru.wikipedia.org") {
+        return url.searchParams.get("prop") === "imageinfo" ? RU_FILM_IMAGEINFO : RU_FILM;
+      }
+      if (url.hostname === "en.wikipedia.org") return EMPTY;
+      return undefined;
+    });
+
+    // A film sits in the "series" list: the poster is still better than nothing.
+    const report = await findPosters({ query: "Дюна", type: "series", signal: signal() });
+
+    expect(report.candidates[0]?.imageUrl).toBe(
+      "https://upload.wikimedia.org/wikipedia/ru/1/1a/Dune_2021_poster.jpg",
+    );
+  });
+
   it("queries OMDb with the original title taken from Wikipedia", async () => {
     const fetchMock = stubFetch((url) => {
       if (url.hostname === "ru.wikipedia.org") {

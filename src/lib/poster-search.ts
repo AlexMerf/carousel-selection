@@ -212,21 +212,27 @@ function categoriesOf(page: WikiPage): string[] {
 }
 
 /** People, characters and lists: the images there are never the poster. */
-function keepMediaPages(pages: WikiPage[], type: ItemType): WikiPage[] {
+function keepMediaPages(pages: WikiPage[]): WikiPage[] {
   return pages.filter((page) => {
     const title = page.title ?? "";
     if (!title || /список|list of|\(franchise\)|\(франшиза\)/i.test(title)) return false;
     const categories = categoriesOf(page);
     if (categories.some((category) => NOT_MEDIA.test(category))) return false;
     // A sand dune or a band called "Дюна" is not the film the user is adding.
-    if (type !== "anime" && !categories.some((category) => MEDIA.test(category))) return false;
-    // The user said "series", so a film article is about a different work.
-    const film = categories.some((category) => FILM_CATEGORY.test(category));
-    const series = categories.some((category) => SERIES_CATEGORY.test(category));
-    if (type === "series" && film && !series) return false;
-    if (type === "film" && series && !film) return false;
-    return true;
+    return categories.some((category) => MEDIA.test(category));
   });
+}
+
+/**
+ * A film article for a series query (or the other way round) is about a different
+ * work of the same name. It still beats returning nothing, so it only loses points.
+ */
+function isWrongType(page: WikiPage, type: ItemType): boolean {
+  if (type === "anime") return false;
+  const categories = categoriesOf(page);
+  const film = categories.some((category) => FILM_CATEGORY.test(category));
+  const series = categories.some((category) => SERIES_CATEGORY.test(category));
+  return type === "series" ? film && !series : series && !film;
 }
 
 function isMediaPage(page: WikiPage): boolean {
@@ -249,10 +255,11 @@ async function wikiCandidates(
   apiBase: string,
   pages: WikiPage[],
   queries: string[],
+  type: ItemType,
   signal: AbortSignal,
 ): Promise<PosterCandidate[]> {
   const normalizedQueries = queries.map(normalizeTitle).filter(Boolean);
-  const entries: Array<{ title: string; media: boolean; files: string[] }> = [];
+  const entries: Array<{ title: string; media: boolean; wrongType: boolean; files: string[] }> = [];
 
   for (const page of pages.slice(0, MAX_PAGES)) {
     const title = page.title ?? "";
@@ -262,7 +269,9 @@ async function wikiCandidates(
       .filter((file) => file && !SKIP_FILE.test(file) && RASTER_FILE.test(file))
       .sort((a, b) => fileScore(b) - fileScore(a))
       .slice(0, MAX_FILES_PER_PAGE);
-    if (files.length > 0) entries.push({ title, media: isMediaPage(page), files });
+    if (files.length > 0) {
+      entries.push({ title, media: isMediaPage(page), wrongType: isWrongType(page, type), files });
+    }
   }
 
   if (entries.length === 0) return [];
@@ -309,10 +318,11 @@ async function wikiCandidates(
     const relevance = titleScore(normalizedQueries, entry.title);
     if (relevance === 0) continue;
     const mediaBonus = entry.media ? 12 : 0;
+    const typePenalty = entry.wrongType ? 30 : 0;
     scored.push({
       file: best.file,
       page: entry.title,
-      score: relevance * 10 + mediaBonus + best.score,
+      score: relevance * 10 + mediaBonus + best.score - typePenalty,
     });
   }
 
@@ -347,18 +357,18 @@ async function fetchWikipedia(
   signal: AbortSignal,
 ): Promise<WikipediaResult> {
   const ruQueries = unique([`${bareTitle(query)} ${TYPE_HINT[type].ru}`, query]);
-  const ruPages = keepMediaPages(await searchPages(RU_WIKI, ruQueries, signal), type);
+  const ruPages = keepMediaPages(await searchPages(RU_WIKI, ruQueries, signal));
   const english = englishTitles(matchingPages(ruPages, ruQueries)).slice(0, 2);
   const englishTitle = english[0] ? bareTitle(english[0]) : undefined;
 
-  const ruTask = wikiCandidates(RU_WIKI, ruPages, ruQueries, signal);
+  const ruTask = wikiCandidates(RU_WIKI, ruPages, ruQueries, type, signal);
   // Russian Wikipedia does not host non-free posters, so the article about the
   // same title in English is the source that actually has one.
   const enTask = (async () => {
     if (!english[0]) return [];
     const enQueries = unique([`${bareTitle(english[0])} ${TYPE_HINT[type].en}`, ...english]);
-    const enPages = keepMediaPages(await searchPages(EN_WIKI, enQueries, signal), type);
-    return wikiCandidates(EN_WIKI, enPages, enQueries, signal);
+    const enPages = keepMediaPages(await searchPages(EN_WIKI, enQueries, signal));
+    return wikiCandidates(EN_WIKI, enPages, enQueries, type, signal);
   })();
 
   const settled = await Promise.allSettled([ruTask, enTask]);
@@ -544,8 +554,8 @@ export async function findPosters(options: {
   if (candidates.length === 0 && !signal.aborted) {
     try {
       const queries = unique([`${bareTitle(trimmed)} ${TYPE_HINT[type].en}`, trimmed]);
-      const pages = keepMediaPages(await searchPages(EN_WIKI, queries, signal), type);
-      candidates = await wikiCandidates(EN_WIKI, pages, queries, signal);
+      const pages = keepMediaPages(await searchPages(EN_WIKI, queries, signal));
+      candidates = await wikiCandidates(EN_WIKI, pages, queries, type, signal);
     } catch (error) {
       if (!signal.aborted) errors.push(`Википедия (en): ${describeError(error)}`);
     }
