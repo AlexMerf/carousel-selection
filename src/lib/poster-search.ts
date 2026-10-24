@@ -22,8 +22,53 @@ export const SOURCE_LABEL: Record<PosterSource, string> = {
   omdb: "OMDb",
 };
 
+const RU_WIKI = "https://ru.wikipedia.org/w/api.php";
+const EN_WIKI = "https://en.wikipedia.org/w/api.php";
+
+/**
+ * The word the user searches for is often the name of a book or a historical
+ * figure ("Ганнибал" — the Carthaginian general, not the NBC series). Adding
+ * the type word to the query is what pushes the right article to the top.
+ */
+const TYPE_HINT: Record<ItemType, { ru: string; en: string }> = {
+  film: { ru: "фильм", en: "film" },
+  series: { ru: "телесериал", en: "TV series" },
+  anime: { ru: "аниме", en: "anime" },
+};
+
 const SKIP_FILE = /(logo|icon|flag|signature|commons|barnstar|symbol|\.svg)/i;
 const RASTER_FILE = /\.(jpe?g|png)$/i;
+
+/** Categories of articles about people and characters — never a poster source. */
+const NOT_MEDIA =
+  /(персоналии|родившиеся|умершие|вымышленн|персонажи|саундтрек|soundtrack|fictional|\bbirths\b|\bdeaths\b|people from)/i;
+
+/** Categories of articles about a film or a series — these deserve a bonus. */
+const MEDIA =
+  /(фильм|телесериал|мультфильм|аниме|кино|сезон|television series|television seasons?|\bfilms?\b|animated (series|film))/i;
+
+const FILM_CATEGORY = /(фильм|\bfilms?\b|\bmovies?\b)/i;
+const SERIES_CATEGORY = /(телесериал|television series|web series|miniseries)/i;
+
+/** A photo of a person or of a sculpture is never key art, however 2:3 it is. */
+const PERSON_PICTURE =
+  /(bust|sculpt|statue|engraving|gravure|гравюр|портрет|portrait|painting|monument|памятник|headshot|festival|cannes|premiere|skidmore|cast)/i;
+
+const MAX_PAGES = 6;
+const MAX_FILES_PER_PAGE = 8;
+
+function unique(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : "ошибка запроса";
+}
+
+/** "Ганнибал (телесериал)" → "Ганнибал": search engines handle the bare title better. */
+function bareTitle(title: string): string {
+  return title.replace(/\s*\([^)]*\)\s*$/, "").trim() || title.trim();
+}
 
 function fileScore(name: string): number {
   const lower = name.toLowerCase();
@@ -31,6 +76,13 @@ function fileScore(name: string): number {
   if (/\.(jpe?g)$/.test(lower)) return 2;
   if (/\.png$/.test(lower)) return 1;
   return 0;
+}
+
+/** "Denis Villeneuve 2017 crop.jpg" on the Dune article is a director photo, not key art. */
+function fileMentionsTitle(file: string, terms: string[]): boolean {
+  const normalized = normalizeTitle(file.replace(/\.(jpe?g|png)$/i, ""));
+  if (!normalized) return false;
+  return terms.some((term) => term.length >= 3 && normalized.includes(term));
 }
 
 function normalizeTitle(value: string): string {
@@ -44,20 +96,39 @@ function normalizeTitle(value: string): string {
 }
 
 /** Exact article titles beat "actor name" pages that match the same words. */
-function titleScore(query: string, title: string): number {
-  if (!query) return 0;
+function titleScore(queries: string[], title: string): number {
   const normalized = normalizeTitle(title);
   if (!normalized) return 0;
-  if (normalized === query) return 3;
-  if (normalized.startsWith(query) || query.startsWith(normalized)) return 2.5;
-  if (normalized.includes(query)) return 2;
-  return 0;
+  let best = 0;
+  for (const query of queries) {
+    if (!query) continue;
+    if (normalized === query) return 3;
+    if (normalized.startsWith(query) || query.startsWith(normalized)) {
+      best = Math.max(best, 2.5);
+    } else if (normalized.includes(query)) {
+      best = Math.max(best, 2);
+    }
+  }
+  return best;
+}
+
+function scoreFile(file: string, ratio: number, terms: string[]): number {
+  let score = fileScore(file) * 3;
+  if (ratio >= 1.25 && ratio <= 1.85) score += 24;
+  else if (ratio >= 1.1) score += 8;
+  if (/(poster|постер|season|сезон|обложка|cover|title card)/i.test(file)) score += 8;
+  if (fileMentionsTitle(file, terms)) score += 14;
+  // A negative total drops the picture: a bust in portrait orientation would
+  // otherwise outrank every real poster.
+  if (PERSON_PICTURE.test(file)) score -= 60;
+  return score;
 }
 
 interface WikiPage {
   pageid?: number;
   title?: string;
   images?: Array<{ title?: string }>;
+  categories?: Array<{ title?: string }>;
   langlinks?: Array<{ "*"?: string }>;
   imageinfo?: Array<{
     thumburl?: string;
@@ -88,35 +159,110 @@ async function wikiQuery(
   return (await response.json()) as WikiResponse;
 }
 
-const PERSON_PHOTO = /(by (gage )?skidmore|headshot|portrait|портрет|festival|cannes|premiere|photograph)/i;
+function searchParams(search: string): URLSearchParams {
+  return new URLSearchParams({
+    action: "query",
+    format: "json",
+    origin: "*",
+    generator: "search",
+    gsrsearch: search,
+    gsrlimit: "5",
+    gsrnamespace: "0",
+    prop: "images|categories|langlinks",
+    imlimit: "40",
+    cllimit: "max",
+    lllang: "en",
+    lllimit: "max",
+  });
+}
 
-function scoreFile(file: string, ratio: number): number {
-  let score = fileScore(file) * 3;
-  if (ratio >= 1.25 && ratio <= 1.85) score += 24;
-  else if (ratio >= 1.1) score += 8;
-  if (/(poster|постер|season|сезон|обложка|cover|title card)/i.test(file)) score += 8;
-  if (PERSON_PHOTO.test(file)) score -= 40;
-  return score;
+/** Plain and type-hinted searches at once; the hinted results come first. */
+async function searchPages(
+  apiBase: string,
+  queries: string[],
+  signal: AbortSignal,
+): Promise<WikiPage[]> {
+  const settled = await Promise.allSettled(
+    queries.map((search) => wikiQuery(apiBase, searchParams(search), signal)),
+  );
+
+  const pages: WikiPage[] = [];
+  const seen = new Set<string>();
+  let failure: unknown = null;
+
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      failure ??= result.reason;
+      continue;
+    }
+    for (const page of wikiPages(result.value)) {
+      const key = page.title ?? String(page.pageid ?? "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      pages.push(page);
+    }
+  }
+
+  if (pages.length === 0 && failure && !signal.aborted) throw failure;
+  return pages;
+}
+
+function categoriesOf(page: WikiPage): string[] {
+  return (page.categories ?? []).map((category) => category.title ?? "");
+}
+
+/** People, characters and lists: the images there are never the poster. */
+function keepMediaPages(pages: WikiPage[], type: ItemType): WikiPage[] {
+  return pages.filter((page) => {
+    const title = page.title ?? "";
+    if (!title || /список|list of|\(franchise\)|\(франшиза\)/i.test(title)) return false;
+    const categories = categoriesOf(page);
+    if (categories.some((category) => NOT_MEDIA.test(category))) return false;
+    // A sand dune or a band called "Дюна" is not the film the user is adding.
+    if (type !== "anime" && !categories.some((category) => MEDIA.test(category))) return false;
+    // The user said "series", so a film article is about a different work.
+    const film = categories.some((category) => FILM_CATEGORY.test(category));
+    const series = categories.some((category) => SERIES_CATEGORY.test(category));
+    if (type === "series" && film && !series) return false;
+    if (type === "film" && series && !film) return false;
+    return true;
+  });
+}
+
+function isMediaPage(page: WikiPage): boolean {
+  return categoriesOf(page).some((category) => MEDIA.test(category));
+}
+
+/** Pages whose title is the searched title — a page that merely mentions it is not. */
+function matchingPages(pages: WikiPage[], queries: string[]): WikiPage[] {
+  const normalizedQueries = queries.map(normalizeTitle).filter(Boolean);
+  return pages.filter((page) => titleScore(normalizedQueries, page.title ?? "") > 0);
+}
+
+function englishTitles(pages: WikiPage[]): string[] {
+  return unique(
+    pages.flatMap((page) => (page.langlinks ?? []).map((link) => link["*"] ?? "")),
+  );
 }
 
 async function wikiCandidates(
   apiBase: string,
   pages: WikiPage[],
-  query: string,
+  queries: string[],
   signal: AbortSignal,
 ): Promise<PosterCandidate[]> {
-  const normalizedQuery = normalizeTitle(query);
-  const entries: Array<{ title: string; files: string[] }> = [];
+  const normalizedQueries = queries.map(normalizeTitle).filter(Boolean);
+  const entries: Array<{ title: string; media: boolean; files: string[] }> = [];
 
-  for (const page of pages) {
+  for (const page of pages.slice(0, MAX_PAGES)) {
     const title = page.title ?? "";
-    if (!title || /список|list of|сезон \d|season \d/i.test(title)) continue;
+    if (!title) continue;
     const files = (page.images ?? [])
       .map((image) => image.title ?? "")
       .filter((file) => file && !SKIP_FILE.test(file) && RASTER_FILE.test(file))
       .sort((a, b) => fileScore(b) - fileScore(a))
-      .slice(0, 8);
-    if (files.length > 0) entries.push({ title, files });
+      .slice(0, MAX_FILES_PER_PAGE);
+    if (files.length > 0) entries.push({ title, media: isMediaPage(page), files });
   }
 
   if (entries.length === 0) return [];
@@ -152,15 +298,21 @@ async function wikiCandidates(
     for (const file of entry.files) {
       const info = byFile.get(file);
       if (!info) continue;
-      const score = scoreFile(file, info.ratio);
+      const score = scoreFile(file, info.ratio, normalizedQueries);
       if (!best || score > best.score) best = { file, score };
     }
     // Negative score means the best image on the page is a person photo, not artwork.
     if (!best || best.score <= 0) continue;
+    // An article that only mentions the title in its text ("Команда-А" mentions
+    // Ганнибал Smith) is not the article about this title: the poster there is
+    // some other film's key art.
+    const relevance = titleScore(normalizedQueries, entry.title);
+    if (relevance === 0) continue;
+    const mediaBonus = entry.media ? 12 : 0;
     scored.push({
       file: best.file,
       page: entry.title,
-      score: titleScore(normalizedQuery, entry.title) * 10 + best.score,
+      score: relevance * 10 + mediaBonus + best.score,
     });
   }
 
@@ -183,70 +335,42 @@ async function wikiCandidates(
   });
 }
 
-/** Russian articles about films often have no poster, but their English counterpart does. */
-async function englishTitles(pageTitles: string[], signal: AbortSignal): Promise<string[]> {
-  if (pageTitles.length === 0) return [];
-  const params = new URLSearchParams({
-    action: "query",
-    format: "json",
-    origin: "*",
-    titles: pageTitles.join("|"),
-    prop: "langlinks",
-    lllang: "en",
-    lllimit: "10",
-  });
-  const data = await wikiQuery("https://ru.wikipedia.org/w/api.php", params, signal);
-  return wikiPages(data).flatMap((page) => {
-    const english = page.langlinks?.[0]?.["*"];
-    return english ? [english] : [];
-  });
+interface WikipediaResult {
+  candidates: PosterCandidate[];
+  /** Original title from the article's English version — used for the OMDb query. */
+  englishTitle?: string;
 }
 
-async function fetchWiki(apiBase: string, query: string, signal: AbortSignal): Promise<PosterCandidate[]> {
-  const search = new URLSearchParams({
-    action: "query",
-    format: "json",
-    origin: "*",
-    generator: "search",
-    gsrsearch: query,
-    gsrlimit: "5",
-    gsrnamespace: "0",
-    prop: "images",
-    imlimit: "40",
-  });
-  const pages = wikiPages(await wikiQuery(apiBase, search, signal));
-  const candidates = await wikiCandidates(apiBase, pages, query, signal);
+async function fetchWikipedia(
+  query: string,
+  type: ItemType,
+  signal: AbortSignal,
+): Promise<WikipediaResult> {
+  const ruQueries = unique([`${bareTitle(query)} ${TYPE_HINT[type].ru}`, query]);
+  const ruPages = keepMediaPages(await searchPages(RU_WIKI, ruQueries, signal), type);
+  const english = englishTitles(matchingPages(ruPages, ruQueries)).slice(0, 2);
+  const englishTitle = english[0] ? bareTitle(english[0]) : undefined;
 
-  if (!apiBase.includes("ru.wikipedia")) return candidates;
+  const ruTask = wikiCandidates(RU_WIKI, ruPages, ruQueries, signal);
+  // Russian Wikipedia does not host non-free posters, so the article about the
+  // same title in English is the source that actually has one.
+  const enTask = (async () => {
+    if (!english[0]) return [];
+    const enQueries = unique([`${bareTitle(english[0])} ${TYPE_HINT[type].en}`, ...english]);
+    const enPages = keepMediaPages(await searchPages(EN_WIKI, enQueries, signal), type);
+    return wikiCandidates(EN_WIKI, enPages, enQueries, signal);
+  })();
 
-  try {
-    const titles = pages
-      .map((page) => page.title ?? "")
-      .filter((title) => title && !/список|list of|сезон \d|season \d/i.test(title))
-      .slice(0, 2);
-    const english = await englishTitles(titles, signal);
-    if (english.length === 0) return candidates;
-
-    const englishBase = "https://en.wikipedia.org/w/api.php";
-    const englishPages = wikiPages(
-      await wikiQuery(
-        englishBase,
-        new URLSearchParams({
-          action: "query",
-          format: "json",
-          origin: "*",
-          titles: english.join("|"),
-          prop: "images",
-          imlimit: "40",
-        }),
-        signal,
-      ),
+  const settled = await Promise.allSettled([ruTask, enTask]);
+  const candidates = settled.flatMap((part) => (part.status === "fulfilled" ? part.value : []));
+  if (candidates.length === 0) {
+    const failed = settled.find(
+      (part): part is PromiseRejectedResult => part.status === "rejected",
     );
-    const englishCandidates = await wikiCandidates(englishBase, englishPages, query, signal);
-    return [...candidates, ...englishCandidates];
-  } catch {
-    return candidates;
+    if (failed && !signal.aborted) throw failed.reason;
   }
+
+  return { candidates, englishTitle };
 }
 
 interface AniListMedia {
@@ -334,6 +458,8 @@ async function fetchOmdb(
   const response = await fetch(`https://www.omdbapi.com/?${params.toString()}`, { signal });
   const data = (await response.json()) as OmdbResponse;
   if (data.Response !== "True") {
+    // "Movie not found!" is a normal empty answer — only real problems are errors.
+    if (/not found/i.test(data.Error ?? "")) return [];
     throw new Error(data.Error ?? "OMDb не ответил");
   }
   return (data.Search ?? []).flatMap((item) => {
@@ -363,7 +489,7 @@ function dedupe(candidates: PosterCandidate[]): PosterCandidate[] {
 
 /**
  * Looks for poster candidates in every source that can answer:
- * ru-wiki for Russian titles, AniList for anime, OMDb when the user added a key.
+ * ru/en Wikipedia for any title, AniList for anime, OMDb when the user added a key.
  * A source that fails (no key, blocked, empty) never fails the whole search.
  */
 export async function findPosters(options: {
@@ -377,57 +503,51 @@ export async function findPosters(options: {
   if (!trimmed) return { candidates: [], errors: [] };
 
   const errors: string[] = [];
-  const tasks: Array<{ label: string; source: PosterSource; run: () => Promise<PosterCandidate[]> }> =
-    [];
-
-  tasks.push({
-    label: "Википедия",
-    source: "wikipedia",
-    run: () => fetchWiki("https://ru.wikipedia.org/w/api.php", trimmed, signal),
-  });
-
-  if (type === "anime") {
-    tasks.push({ label: "AniList", source: "anilist", run: () => fetchAniList(trimmed, signal) });
-  }
-
-  if (omdbKey && omdbKey.trim()) {
-    tasks.push({
-      label: "OMDb",
-      source: "omdb",
-      run: () => fetchOmdb(trimmed, type, omdbKey, signal),
-    });
-  }
-
-  const settled = await Promise.allSettled(tasks.map((task) => task.run()));
   const buckets: Record<PosterSource, PosterCandidate[]> = {
     wikipedia: [],
     anilist: [],
     omdb: [],
   };
 
-  settled.forEach((result, index) => {
-    const task = tasks[index];
-    if (!task) return;
-    if (result.status === "fulfilled") {
-      buckets[task.source].push(...result.value);
-    } else if (!signal.aborted) {
-      const reason = result.reason instanceof Error ? result.reason.message : "ошибка запроса";
-      errors.push(`${task.label}: ${reason}`);
-    }
-  });
+  const [wiki, anilist] = await Promise.allSettled([
+    fetchWikipedia(trimmed, type, signal),
+    type === "anime" ? fetchAniList(trimmed, signal) : Promise.resolve<PosterCandidate[]>([]),
+  ]);
 
-  // Anime covers are far better on AniList, while ru-wiki wins for Russian film titles.
+  if (wiki.status === "fulfilled") {
+    buckets.wikipedia = wiki.value.candidates;
+  } else if (!signal.aborted) {
+    errors.push(`Википедия: ${describeError(wiki.reason)}`);
+  }
+
+  if (anilist.status === "fulfilled") {
+    buckets.anilist = anilist.value;
+  } else if (!signal.aborted) {
+    errors.push(`AniList: ${describeError(anilist.reason)}`);
+  }
+
+  // OMDb only knows original titles, so it waits for the English one.
+  const englishTitle = wiki.status === "fulfilled" ? wiki.value.englishTitle : undefined;
+  if (omdbKey?.trim() && !signal.aborted) {
+    try {
+      buckets.omdb = await fetchOmdb(englishTitle ?? trimmed, type, omdbKey, signal);
+    } catch (error) {
+      if (!signal.aborted) errors.push(`OMDb: ${describeError(error)}`);
+    }
+  }
+
+  // OMDb wins when the key works: it is the only source that knows the exact title.
   const order: PosterSource[] =
-    type === "anime" ? ["anilist", "wikipedia", "omdb"] : ["wikipedia", "anilist", "omdb"];
+    type === "anime" ? ["anilist", "omdb", "wikipedia"] : ["omdb", "wikipedia", "anilist"];
   let candidates: PosterCandidate[] = order.flatMap((source) => buckets[source]);
 
   if (candidates.length === 0 && !signal.aborted) {
     try {
-      candidates = await fetchWiki("https://en.wikipedia.org/w/api.php", trimmed, signal);
+      const queries = unique([`${bareTitle(trimmed)} ${TYPE_HINT[type].en}`, trimmed]);
+      const pages = keepMediaPages(await searchPages(EN_WIKI, queries, signal), type);
+      candidates = await wikiCandidates(EN_WIKI, pages, queries, signal);
     } catch (error) {
-      if (!signal.aborted) {
-        errors.push(`Википедия (en): ${error instanceof Error ? error.message : "ошибка запроса"}`);
-      }
+      if (!signal.aborted) errors.push(`Википедия (en): ${describeError(error)}`);
     }
   }
 
