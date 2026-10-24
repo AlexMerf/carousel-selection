@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { KeyboardEvent } from "react";
 import { Loader2, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -56,25 +56,40 @@ export function PosterFinder({ query, type, omdbKey, onPick }: PosterFinderProps
     return () => abortRef.current?.abort();
   }, [run, query]);
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const submit = () => {
     void run(text);
+  };
+
+  // The finder lives inside the item dialog's <form>, so a nested <form> here
+  // would bubble its submit up and save-and-close the whole dialog.
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    submit();
   };
 
   return (
     <div className="space-y-2 rounded-xl border border-white/10 bg-background/40 p-3">
-      <form onSubmit={submit} className="flex gap-2">
+      <div className="flex gap-2">
         <Input
           value={text}
           onChange={(event) => setText(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Название для поиска"
           autoComplete="off"
           className="h-9"
         />
-        <Button type="submit" size="icon" variant="secondary" className="size-9 shrink-0" aria-label="Искать постер">
+        <Button
+          type="button"
+          onClick={submit}
+          size="icon"
+          variant="secondary"
+          className="size-9 shrink-0"
+          aria-label="Искать постер"
+        >
           <Search className="size-4" />
         </Button>
-      </form>
+      </div>
 
       {loading ? (
         <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
