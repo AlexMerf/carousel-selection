@@ -58,7 +58,15 @@ interface WikiPage {
   pageid?: number;
   title?: string;
   images?: Array<{ title?: string }>;
-  imageinfo?: Array<{ thumburl?: string; url?: string }>;
+  langlinks?: Array<{ "*"?: string }>;
+  imageinfo?: Array<{
+    thumburl?: string;
+    url?: string;
+    thumbwidth?: number;
+    thumbheight?: number;
+    width?: number;
+    height?: number;
+  }>;
 }
 
 interface WikiResponse {
@@ -68,6 +76,130 @@ interface WikiResponse {
 
 function wikiPages(data: WikiResponse): WikiPage[] {
   return Object.values(data.query?.pages ?? {});
+}
+
+async function wikiQuery(
+  apiBase: string,
+  params: URLSearchParams,
+  signal: AbortSignal,
+): Promise<WikiResponse> {
+  const response = await fetch(`${apiBase}?${params.toString()}`, { signal });
+  if (!response.ok) throw new Error(`Википедия ответила ${response.status}`);
+  return (await response.json()) as WikiResponse;
+}
+
+const PERSON_PHOTO = /(by (gage )?skidmore|headshot|portrait|портрет|festival|cannes|premiere|photograph)/i;
+
+function scoreFile(file: string, ratio: number): number {
+  let score = fileScore(file) * 3;
+  if (ratio >= 1.25 && ratio <= 1.85) score += 24;
+  else if (ratio >= 1.1) score += 8;
+  if (/(poster|постер|season|сезон|обложка|cover|title card)/i.test(file)) score += 8;
+  if (PERSON_PHOTO.test(file)) score -= 40;
+  return score;
+}
+
+async function wikiCandidates(
+  apiBase: string,
+  pages: WikiPage[],
+  query: string,
+  signal: AbortSignal,
+): Promise<PosterCandidate[]> {
+  const normalizedQuery = normalizeTitle(query);
+  const entries: Array<{ title: string; files: string[] }> = [];
+
+  for (const page of pages) {
+    const title = page.title ?? "";
+    if (!title || /список|list of|сезон \d|season \d/i.test(title)) continue;
+    const files = (page.images ?? [])
+      .map((image) => image.title ?? "")
+      .filter((file) => file && !SKIP_FILE.test(file) && RASTER_FILE.test(file))
+      .sort((a, b) => fileScore(b) - fileScore(a))
+      .slice(0, 8);
+    if (files.length > 0) entries.push({ title, files });
+  }
+
+  if (entries.length === 0) return [];
+
+  const params = new URLSearchParams({
+    action: "query",
+    format: "json",
+    origin: "*",
+    titles: entries.flatMap((entry) => entry.files).join("|"),
+    prop: "imageinfo",
+    iiprop: "url|size",
+    iiurlwidth: "420",
+  });
+  const infoData = await wikiQuery(apiBase, params, signal);
+
+  const byFile = new Map<string, { url: string; ratio: number }>();
+  for (const page of wikiPages(infoData)) {
+    const file = page.title ?? "";
+    const infoEntry = page.imageinfo?.[0];
+    const rawUrl = infoEntry?.thumburl ?? infoEntry?.url;
+    if (!file || !rawUrl) continue;
+    const width =
+      typeof infoEntry?.thumbwidth === "number" ? infoEntry.thumbwidth : infoEntry?.width;
+    const height =
+      typeof infoEntry?.thumbheight === "number" ? infoEntry.thumbheight : infoEntry?.height;
+    const ratio = width && height ? height / width : 0;
+    byFile.set(file, { url: rawUrl.split("?")[0] ?? rawUrl, ratio });
+  }
+
+  const scored: Array<{ file: string; page: string; score: number }> = [];
+  for (const entry of entries) {
+    let best: { file: string; score: number } | null = null;
+    for (const file of entry.files) {
+      const info = byFile.get(file);
+      if (!info) continue;
+      const score = scoreFile(file, info.ratio);
+      if (!best || score > best.score) best = { file, score };
+    }
+    // Negative score means the best image on the page is a person photo, not artwork.
+    if (!best || best.score <= 0) continue;
+    scored.push({
+      file: best.file,
+      page: entry.title,
+      score: titleScore(normalizedQuery, entry.title) * 10 + best.score,
+    });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  const host = apiBase.includes("ru.wikipedia") ? "ru.wikipedia.org" : "en.wikipedia.org";
+
+  return scored.slice(0, 4).flatMap((pick) => {
+    const info = byFile.get(pick.file);
+    if (!info) return [];
+    return [
+      {
+        id: `wiki:${pick.file}`,
+        title: pick.page,
+        subtitle: pick.file.replace(/^Файл:|^File:/, ""),
+        imageUrl: info.url,
+        source: "wikipedia" as const,
+        pageUrl: `https://${host}/wiki/${encodeURIComponent(pick.page.replace(/ /g, "_"))}`,
+      },
+    ];
+  });
+}
+
+/** Russian articles about films often have no poster, but their English counterpart does. */
+async function englishTitles(pageTitles: string[], signal: AbortSignal): Promise<string[]> {
+  if (pageTitles.length === 0) return [];
+  const params = new URLSearchParams({
+    action: "query",
+    format: "json",
+    origin: "*",
+    titles: pageTitles.join("|"),
+    prop: "langlinks",
+    lllang: "en",
+    lllimit: "10",
+  });
+  const data = await wikiQuery("https://ru.wikipedia.org/w/api.php", params, signal);
+  return wikiPages(data).flatMap((page) => {
+    const english = page.langlinks?.[0]?.["*"];
+    return english ? [english] : [];
+  });
 }
 
 async function fetchWiki(apiBase: string, query: string, signal: AbortSignal): Promise<PosterCandidate[]> {
@@ -82,71 +214,39 @@ async function fetchWiki(apiBase: string, query: string, signal: AbortSignal): P
     prop: "images",
     imlimit: "40",
   });
+  const pages = wikiPages(await wikiQuery(apiBase, search, signal));
+  const candidates = await wikiCandidates(apiBase, pages, query, signal);
 
-  const searchResponse = await fetch(`${apiBase}?${search.toString()}`, { signal });
-  if (!searchResponse.ok) throw new Error(`Википедия ответила ${searchResponse.status}`);
-  const searchData = (await searchResponse.json()) as WikiResponse;
+  if (!apiBase.includes("ru.wikipedia")) return candidates;
 
-  const normalizedQuery = normalizeTitle(query);
-  const picks: Array<{ file: string; page: string; score: number }> = [];
-  for (const page of wikiPages(searchData)) {
-    const title = page.title ?? "";
-    if (/список|list of|сезон \d|season \d/i.test(title)) continue;
-    const files = (page.images ?? [])
-      .map((image) => image.title ?? "")
-      .filter((file) => file && !SKIP_FILE.test(file) && RASTER_FILE.test(file))
-      .sort((a, b) => fileScore(b) - fileScore(a));
-    const best = files[0];
-    if (!best) continue;
-    picks.push({
-      file: best,
-      page: title,
-      score: titleScore(normalizedQuery, title) * 10 + fileScore(best),
-    });
+  try {
+    const titles = pages
+      .map((page) => page.title ?? "")
+      .filter((title) => title && !/список|list of|сезон \d|season \d/i.test(title))
+      .slice(0, 2);
+    const english = await englishTitles(titles, signal);
+    if (english.length === 0) return candidates;
+
+    const englishBase = "https://en.wikipedia.org/w/api.php";
+    const englishPages = wikiPages(
+      await wikiQuery(
+        englishBase,
+        new URLSearchParams({
+          action: "query",
+          format: "json",
+          origin: "*",
+          titles: english.join("|"),
+          prop: "images",
+          imlimit: "40",
+        }),
+        signal,
+      ),
+    );
+    const englishCandidates = await wikiCandidates(englishBase, englishPages, query, signal);
+    return [...candidates, ...englishCandidates];
+  } catch {
+    return candidates;
   }
-
-  picks.sort((a, b) => b.score - a.score);
-  const top = picks.slice(0, 4);
-
-  if (top.length === 0) return [];
-
-  const info = new URLSearchParams({
-    action: "query",
-    format: "json",
-    origin: "*",
-    titles: top.map((pick) => pick.file).join("|"),
-    prop: "imageinfo",
-    iiprop: "url",
-    iiurlwidth: "420",
-  });
-
-  const infoResponse = await fetch(`${apiBase}?${info.toString()}`, { signal });
-  if (!infoResponse.ok) throw new Error(`Википедия ответила ${infoResponse.status}`);
-  const infoData = (await infoResponse.json()) as WikiResponse;
-
-  const byFile = new Map<string, string>();
-  for (const page of wikiPages(infoData)) {
-    const file = page.title ?? "";
-    const url = page.imageinfo?.[0]?.thumburl ?? page.imageinfo?.[0]?.url;
-    if (file && url) byFile.set(file, url);
-  }
-
-  const host = apiBase.includes("ru.wikipedia") ? "ru.wikipedia.org" : "en.wikipedia.org";
-  return top.flatMap((pick) => {
-    const rawUrl = byFile.get(pick.file);
-    if (!rawUrl) return [];
-    const imageUrl = rawUrl.split("?")[0] ?? rawUrl;
-    return [
-      {
-        id: `wiki:${pick.file}`,
-        title: pick.page,
-        subtitle: pick.file.replace(/^Файл:|^File:/, ""),
-        imageUrl,
-        source: "wikipedia" as const,
-        pageUrl: `https://${host}/wiki/${encodeURIComponent(pick.page.replace(/ /g, "_"))}`,
-      },
-    ];
-  });
 }
 
 interface AniListMedia {
