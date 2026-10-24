@@ -2,6 +2,9 @@ import type { AppState, Item, ItemStatus, ItemType } from "@/types";
 
 export const ITEM_TYPES: ItemType[] = ["film", "series", "anime"];
 
+/** Series first: the couple's ritual starts with a show, then an anime. */
+export const DEFAULT_LIST: ItemType = "series";
+
 export const TYPE_LABEL: Record<ItemType, string> = {
   film: "Фильм",
   series: "Сериал",
@@ -47,8 +50,17 @@ export function isHistoryItem(item: Item): boolean {
   return item.status === "watching" || item.status === "watched" || item.status === "dropped";
 }
 
-export function poolCandidates(items: Item[], types: Set<ItemType>): Item[] {
-  return items.filter((item) => item.status === "pool" && types.has(item.type));
+/** How many pool entries each list holds — drives the switcher counters. */
+export function countByType(items: Item[]): Record<ItemType, number> {
+  const counts: Record<ItemType, number> = { film: 0, series: 0, anime: 0 };
+  for (const item of items) counts[item.type] += 1;
+  return counts;
+}
+
+/** First non-empty list other than `active` — the "switch to the other one" hint. */
+export function nextListWithItems(items: Item[], active: ItemType): ItemType | null {
+  const counts = countByType(items);
+  return ITEM_TYPES.find((type) => type !== active && counts[type] > 0) ?? null;
 }
 
 export function pickUniform(list: Item[]): Item | null {
@@ -104,7 +116,7 @@ export function createEmptyState(): AppState {
   return {
     version: STATE_VERSION,
     items: [],
-    settings: { sound: true },
+    settings: { sound: true, activeList: DEFAULT_LIST },
     lastWinnerId: null,
   };
 }

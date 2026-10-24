@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Disc3, Settings, Volume2, VolumeX } from "lucide-react";
+import { Heart, Settings, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 
 import { HiddenView } from "@/components/hidden-view";
@@ -11,7 +11,7 @@ import { SpinScreen } from "@/components/spin-screen";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { createEmptyState, EXAMPLE_ITEMS, ITEM_TYPES, uid } from "@/lib/items";
+import { countByType, createEmptyState, EXAMPLE_ITEMS, TYPE_LABEL, uid } from "@/lib/items";
 import { sound } from "@/lib/sound";
 import { exportStateFile, loadState, readStateFile, saveState } from "@/lib/storage";
 import type { AppState, Item, ItemStatus, ItemType, TabId } from "@/types";
@@ -19,7 +19,7 @@ import type { AppState, Item, ItemStatus, ItemType, TabId } from "@/types";
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState());
   const [tab, setTab] = useState<TabId>("wheel");
-  const [types, setTypes] = useState<Set<ItemType>>(() => new Set(ITEM_TYPES));
+  const [dialogList, setDialogList] = useState<ItemType | null>(null);
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [finderInitiallyOpen, setFinderInitiallyOpen] = useState(false);
@@ -40,6 +40,17 @@ export default function App() {
   );
   const hidden = useMemo(() => state.items.filter((item) => item.status === "hidden"), [state.items]);
 
+  /** The list the wheel spins and the pool tab shows — persisted with the rest of settings. */
+  const activeList = state.settings.activeList;
+  const listPool = useMemo(
+    () => pool.filter((item) => item.type === activeList),
+    [pool, activeList],
+  );
+  const counts = useMemo(() => countByType(pool), [pool]);
+
+  const setActiveList = (type: ItemType) =>
+    setState((prev) => ({ ...prev, settings: { ...prev.settings, activeList: type } }));
+
   const addItem = (values: ItemFormValues) => {
     const now = Date.now();
     const item: Item = {
@@ -51,8 +62,13 @@ export default function App() {
       createdAt: now,
       statusChangedAt: now,
     };
-    setState((prev) => ({ ...prev, items: [...prev.items, item] }));
-    toast.success(`«${item.title}» — в пуле`);
+    // Jump to the list the position landed in, so it never disappears from view.
+    setState((prev) => ({
+      ...prev,
+      items: [...prev.items, item],
+      settings: { ...prev.settings, activeList: item.type },
+    }));
+    toast.success(`«${item.title}» — в списке «${TYPE_LABEL[item.type]}»`);
   };
 
   const updateItem = (id: string, values: ItemFormValues) => {
@@ -68,6 +84,8 @@ export default function App() {
             }
           : item,
       ),
+      // A retyped position moves between lists; follow it so it stays visible.
+      settings: { ...prev.settings, activeList: values.type },
     }));
     toast(`«${values.title}» обновлён`);
   };
@@ -93,9 +111,16 @@ export default function App() {
     setState((prev) => ({ ...prev, lastWinnerId: item.id }));
   };
 
-  const addExamples = () => {
+  /** "We already saw this one" — straight to history as watched, no spin needed. */
+  const markWatched = (item: Item) => {
+    setStatus(item.id, "watched");
+    toast.success(`«${item.title}» — просмотрено, записал в историю`);
+  };
+
+  const addExamples = (list?: ItemType) => {
     const now = Date.now();
-    const examples: Item[] = EXAMPLE_ITEMS.map((example, index) => ({
+    const source = list ? EXAMPLE_ITEMS.filter((example) => example.type === list) : EXAMPLE_ITEMS;
+    const examples: Item[] = source.map((example, index) => ({
       id: uid(),
       title: example.title,
       type: example.type,
@@ -103,17 +128,16 @@ export default function App() {
       createdAt: now + index,
       statusChangedAt: now + index,
     }));
-    setState((prev) => ({ ...prev, items: [...prev.items, ...examples] }));
-    toast.success("Добавил шесть примеров — можно крутить");
-  };
-
-  const toggleType = (type: ItemType) => {
-    setTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
+    setState((prev) => ({
+      ...prev,
+      items: [...prev.items, ...examples],
+      settings: list ? { ...prev.settings, activeList: list } : prev.settings,
+    }));
+    toast.success(
+      list
+        ? `Добавил примеры в список «${TYPE_LABEL[list]}»`
+        : "Добавил шесть примеров — можно крутить",
+    );
   };
 
   const handleImport = (file: File) => {
@@ -132,20 +156,23 @@ export default function App() {
     toast("Всё очищено");
   };
 
-  const openAddDialog = () => {
+  const openAddDialog = (list?: ItemType) => {
     setEditingItem(null);
+    setDialogList(list ?? state.settings.activeList);
     setFinderInitiallyOpen(false);
     setItemDialogOpen(true);
   };
 
   const openEditDialog = (item: Item) => {
     setEditingItem(item);
+    setDialogList(null);
     setFinderInitiallyOpen(false);
     setItemDialogOpen(true);
   };
 
   const openPosterSearch = (item: Item) => {
     setEditingItem(item);
+    setDialogList(null);
     setFinderInitiallyOpen(true);
     setItemDialogOpen(true);
   };
@@ -161,10 +188,10 @@ export default function App() {
           <div className="mx-auto flex w-full max-w-2xl items-center justify-between px-4 py-3">
             <div className="flex items-center gap-2.5">
               <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-primary">
-                <Disc3 className="size-5" />
+                <Heart className="size-5 fill-current" />
               </div>
               <div>
-                <p className="text-sm font-semibold leading-none">Кинокольцо</p>
+                <p className="text-sm font-semibold leading-none">Саша + Лера</p>
                 <p className="mt-1 text-[10px] leading-none text-muted-foreground">
                   что посмотреть сегодня
                 </p>
@@ -204,7 +231,7 @@ export default function App() {
               <TabsTrigger value="wheel">Кольцо</TabsTrigger>
               <TabsTrigger value="pool">
                 Пул
-                <span className="ml-1 text-[10px] text-muted-foreground">{pool.length}</span>
+                <span className="ml-1 text-[10px] text-muted-foreground">{listPool.length}</span>
               </TabsTrigger>
               <TabsTrigger value="history">История</TabsTrigger>
               <TabsTrigger value="hidden">Скрытые</TabsTrigger>
@@ -216,8 +243,8 @@ export default function App() {
           <TabsContent value="wheel">
             <SpinScreen
               pool={pool}
-              types={types}
-              onToggleType={toggleType}
+              activeList={activeList}
+              onListChange={setActiveList}
               lastWinnerId={state.lastWinnerId}
               onSpun={recordWinner}
               onStatus={setStatus}
@@ -228,12 +255,16 @@ export default function App() {
 
           <TabsContent value="pool">
             <PoolView
-              items={pool}
-              onAddClick={openAddDialog}
+              items={listPool}
+              activeList={activeList}
+              counts={counts}
+              onListChange={setActiveList}
+              onAddClick={() => openAddDialog(activeList)}
               onAddExamples={addExamples}
               onEdit={openEditDialog}
               onDelete={removeItem}
               onHide={(id) => setStatus(id, "hidden")}
+              onMarkWatched={markWatched}
               onFindPoster={openPosterSearch}
             />
           </TabsContent>
@@ -252,6 +283,7 @@ export default function App() {
         open={itemDialogOpen}
         onOpenChange={setItemDialogOpen}
         item={editingItem}
+        initialType={dialogList ?? activeList}
         omdbKey={state.settings.omdbKey}
         finderInitiallyOpen={finderInitiallyOpen}
         onSubmit={(values) => {

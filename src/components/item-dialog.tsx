@@ -34,6 +34,8 @@ interface ItemDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   item?: Item | null;
+  /** Pre-selected type for a new item — the list the user is adding into. */
+  initialType?: ItemType;
   omdbKey?: string;
   finderInitiallyOpen?: boolean;
   onSubmit: (values: ItemFormValues) => void;
@@ -43,22 +45,23 @@ export function ItemDialog({
   open,
   onOpenChange,
   item,
+  initialType,
   omdbKey,
   finderInitiallyOpen,
   onSubmit,
 }: ItemDialogProps) {
   const [title, setTitle] = useState("");
-  const [type, setType] = useState<ItemType>("film");
+  const [type, setType] = useState<ItemType>(initialType ?? "film");
   const [posterUrl, setPosterUrl] = useState("");
   const [finderOpen, setFinderOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setTitle(item?.title ?? "");
-    setType(item?.type ?? "film");
+    setType(item?.type ?? initialType ?? "film");
     setPosterUrl(item?.posterUrl ?? "");
     setFinderOpen(Boolean(finderInitiallyOpen));
-  }, [open, item, finderInitiallyOpen]);
+  }, [open, item, initialType, finderInitiallyOpen]);
 
   const trimmedTitle = title.trim();
   const canSubmit = trimmedTitle.length > 0;

@@ -7,8 +7,15 @@ import { TYPE_LABEL } from "@/lib/items";
 import { cn } from "@/lib/utils";
 import type { Item } from "@/types";
 import { PosterThumb } from "@/components/poster-thumb";
+import { ProgressiveBlur } from "@/components/motion/progressive-blur";
+import { SpinningText } from "@/components/motion/spinning-text";
+import { Tilt } from "@/components/motion/tilt";
 
 const RING_CAPACITY = 20;
+const RIM_FONT_PX = 9;
+const RIM_PHRASE = "САША + ЛЕРА · КРУТИ · ";
+/** Rough advance width of "0" at RIM_FONT_PX — SpinningText measures radius in ch. */
+const CH_RATIO = 0.55;
 const REEL_ROW_HEIGHT = 96;
 const REEL_ROW_PITCH = 104;
 const REEL_WINDOW_HEIGHT = 216;
@@ -20,8 +27,9 @@ interface StageProps {
   items: Item[];
   pick: () => Item | null;
   spinToken: number;
+  /** Reports the winner plus the on-screen box of its card, for the reveal morph. */
+  onWinner: (item: Item, rect: DOMRect | null) => void;
   onSpinStart: () => void;
-  onWinner: (item: Item) => void;
   className?: string;
 }
 
@@ -47,6 +55,8 @@ function EmptyStage({ className }: { className?: string }) {
 
 function Ring({ items, pick, spinToken, onSpinStart, onWinner, className }: StageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
+  /** Poster card nodes by item id — the winner's box seeds the reveal morph. */
+  const cardNodes = useRef(new Map<string, HTMLDivElement>());
   const [size, setSize] = useState(320);
   const [rotation, setRotation] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -114,7 +124,7 @@ function Ring({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
       setRotation(normalized);
       spinningRef.current = false;
       sound.chime();
-      latest.current.onWinner(winner);
+      latest.current.onWinner(winner, cardNodes.current.get(winner.id)?.getBoundingClientRect() ?? null);
     };
 
     rafRef.current = requestAnimationFrame(frame);
@@ -215,6 +225,14 @@ function Ring({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
   const activeIndex =
     count > 0 ? ((Math.round(((-rotation % 360) + 360) % 360 / step) % count) + count) % count : -1;
 
+  // Rim lettering: fill the circumference evenly at any stage size.
+  const rimRadius = size * 0.462;
+  const rimRepeats = Math.max(
+    1,
+    Math.round((2 * Math.PI * rimRadius) / (RIM_PHRASE.length * RIM_FONT_PX * 0.88)),
+  );
+  const rimRadiusCh = rimRadius / (RIM_FONT_PX * CH_RATIO);
+
   return (
     <div className={cn("relative mx-auto w-full max-w-[420px]", className)}>
       <div
@@ -235,6 +253,17 @@ function Ring({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
           style={{ width: radius * 2 + cardWidth, height: radius * 2 + cardWidth }}
         />
 
+        <div className="pointer-events-none absolute inset-0 grid select-none place-items-center">
+          <SpinningText
+            duration={80}
+            fontSize={RIM_FONT_PX / 16}
+            radius={rimRadiusCh}
+            className="font-medium uppercase tracking-[0.14em] text-white/[0.16]"
+          >
+            {RIM_PHRASE.repeat(rimRepeats)}
+          </SpinningText>
+        </div>
+
         <div
           className="absolute inset-0"
           style={{ transform: `rotate(${rotation}deg)` }}
@@ -251,13 +280,23 @@ function Ring({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
               >
                 <div style={{ transform: `rotate(${-(angle + rotation)}deg)` }}>
                   <div
-                    className={cn(
-                      "overflow-hidden rounded-lg border bg-card shadow-lg shadow-black/50 transition-colors",
-                      index === activeIndex ? "border-primary/70 shadow-primary/20" : "border-white/10",
-                    )}
+                    ref={(node) => {
+                      if (node) cardNodes.current.set(item.id, node);
+                      else cardNodes.current.delete(item.id);
+                    }}
                     style={{ width: cardWidth, height: cardHeight }}
                   >
-                    <PosterThumb item={item} className="size-full" />
+                    <Tilt
+                      rotationFactor={20}
+                      perspective={280}
+                      springOptions={{ stiffness: 320, damping: 26 }}
+                      className={cn(
+                        "size-full overflow-hidden rounded-lg border bg-card shadow-lg shadow-black/50 transition-colors",
+                        index === activeIndex ? "border-primary/70 shadow-primary/20" : "border-white/10",
+                      )}
+                    >
+                      <PosterThumb item={item} className="size-full" />
+                    </Tilt>
                   </div>
                 </div>
               </div>
@@ -284,6 +323,8 @@ function Reel({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
   const [reel, setReel] = useState<Item[]>(() => items.slice(0, 7));
   const [offset, setOffset] = useState(() => reelOffsetFor(1));
   const [spinning, setSpinning] = useState(false);
+  /** Poster nodes by reel index — the winner's box seeds the reveal morph. */
+  const posterNodes = useRef(new Map<number, HTMLDivElement>());
 
   const offsetRef = useRef(reelOffsetFor(1));
   const rafRef = useRef<number | null>(null);
@@ -348,7 +389,10 @@ function Reel({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
       spinningRef.current = false;
       setSpinning(false);
       sound.chime();
-      latest.current.onWinner(winner);
+      latest.current.onWinner(
+        winner,
+        posterNodes.current.get(REEL_WINNER_INDEX)?.getBoundingClientRect() ?? null,
+      );
     };
 
     rafRef.current = requestAnimationFrame(frame);
@@ -400,7 +444,15 @@ function Reel({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
                     isWinner ? "border-primary/70 shadow-[0_0_24px_-6px_rgba(251,191,36,0.45)]" : "border-white/10",
                   )}
                 >
-                  <PosterThumb item={item} className="h-full w-16 shrink-0 rounded-md" />
+                  <div
+                    ref={(node) => {
+                      if (node) posterNodes.current.set(index, node);
+                      else posterNodes.current.delete(index);
+                    }}
+                    className="h-full w-16 shrink-0 overflow-hidden rounded-md"
+                  >
+                    <PosterThumb item={item} className="size-full" />
+                  </div>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{item.title}</p>
                     <p className="text-xs text-muted-foreground">{TYPE_LABEL[item.type]}</p>
@@ -419,8 +471,18 @@ function Reel({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
           <div className="h-0 w-0 border-y-[8px] border-r-[10px] border-y-transparent border-r-primary" />
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-card/95 to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card/95 to-transparent" />
+        <ProgressiveBlur
+          direction="top"
+          blurLayers={6}
+          blurIntensity={0.5}
+          className="pointer-events-none absolute inset-x-0 top-0 h-12"
+        />
+        <ProgressiveBlur
+          direction="bottom"
+          blurLayers={6}
+          blurIntensity={0.5}
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-12"
+        />
       </div>
       <p className="mt-2 text-center text-xs text-muted-foreground">
         Больше {RING_CAPACITY} позиций — кольцо превращается в барабан, победитель всё равно случаен

@@ -1,15 +1,34 @@
+"use client";
+
+// GodUI Sonner — mirrors shadcn/ui new-york-v4 components/ui/sonner.tsx (registry snapshot 2026-10-01).
+// Motion: sonner's own transform/opacity transitions on a spring; its height
+// and box-shadow/background transitions are overridden, so toast heights snap
+// and buttons only fade. User toastOptions are merged, not replaced. GPU-only.
+
 import {
   CircleCheckIcon,
   InfoIcon,
   Loader2Icon,
   OctagonXIcon,
   TriangleAlertIcon,
-} from "lucide-react"
-import { useTheme } from "next-themes"
-import { Toaster as Sonner, type ToasterProps } from "sonner"
+} from "lucide-react";
+import { useTheme } from "next-themes";
+import { Toaster as Sonner, type ToasterProps } from "sonner";
 
-const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+import { cn } from "@/lib/utils";
+
+// Sonner transitions `transform, opacity, height, box-shadow` on every toast
+// and injects its CSS unlayered, which beats anything in Tailwind's
+// @layer utilities whatever the specificity — so the overrides are !important.
+// Only transition-property and the easing are forced; sonner's swipe rule
+// still zeroes the duration, so dragging stays 1:1. Heights snap.
+const GODUI_TOAST =
+  "[transition-property:transform,opacity]! ease-spring-snappy!";
+// Buttons transition box-shadow / background; keep only opacity.
+const GODUI_BUTTON = "[transition-property:opacity]!";
+
+const Toaster = ({ toastOptions, ...props }: ToasterProps) => {
+  const { theme = "system" } = useTheme();
 
   return (
     <Sonner
@@ -30,9 +49,25 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }
+      toastOptions={{
+        ...toastOptions,
+        classNames: {
+          ...toastOptions?.classNames,
+          toast: cn(GODUI_TOAST, toastOptions?.classNames?.toast),
+          actionButton: cn(
+            GODUI_BUTTON,
+            toastOptions?.classNames?.actionButton,
+          ),
+          cancelButton: cn(
+            GODUI_BUTTON,
+            toastOptions?.classNames?.cancelButton,
+          ),
+          closeButton: cn(GODUI_BUTTON, toastOptions?.classNames?.closeButton),
+        },
+      }}
       {...props}
     />
-  )
-}
+  );
+};
 
-export { Toaster }
+export { Toaster };

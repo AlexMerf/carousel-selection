@@ -1,7 +1,17 @@
 import { useState } from "react";
-import { EyeOff, ImageDown, MoreHorizontal, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import {
+  CheckCheck,
+  EyeOff,
+  ImageDown,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 import { ItemRow } from "@/components/item-row";
+import { ListSwitcher } from "@/components/list-switcher";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,35 +29,45 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDate } from "@/lib/items";
-import type { Item } from "@/types";
+import { formatDate, TYPE_LABEL } from "@/lib/items";
+import type { Item, ItemType } from "@/types";
 
 interface PoolViewProps {
   items: Item[];
+  activeList: ItemType;
+  counts: Record<ItemType, number>;
+  onListChange: (type: ItemType) => void;
   onAddClick: () => void;
   onAddExamples: () => void;
   onEdit: (item: Item) => void;
   onDelete: (id: string) => void;
   onHide: (id: string) => void;
+  onMarkWatched: (item: Item) => void;
   onFindPoster: (item: Item) => void;
 }
 
 export function PoolView({
   items,
+  activeList,
+  counts,
+  onListChange,
   onAddClick,
   onAddExamples,
   onEdit,
   onDelete,
   onHide,
+  onMarkWatched,
   onFindPoster,
 }: PoolViewProps) {
   const [pendingDelete, setPendingDelete] = useState<Item | null>(null);
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-3">
+      <ListSwitcher active={activeList} counts={counts} onChange={onListChange} />
+
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-medium">Пул</h2>
+          <h2 className="text-base font-medium">Список «{TYPE_LABEL[activeList]}»</h2>
           <p className="text-xs text-muted-foreground">
             {items.length > 0
               ? `${items.length} ${plural(items.length, "позиция", "позиции", "позиций")} ждут своего часа`
@@ -63,7 +83,8 @@ export function PoolView({
       {items.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-white/15 px-6 py-10 text-center">
           <p className="text-sm text-muted-foreground">
-            Добавь то, что откладывал на потом — фильм, сериал или аниме.
+            В списке «{TYPE_LABEL[activeList]}» пока пусто. Добавь сюда позиции — кольцо будет выбирать
+            только из них.
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button onClick={onAddClick} size="sm">
@@ -107,6 +128,10 @@ export function PoolView({
                   <DropdownMenuItem onClick={() => onFindPoster(item)}>
                     <ImageDown className="size-4" />
                     Найти постер
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onMarkWatched(item)}>
+                    <CheckCheck className="size-4" />
+                    Уже смотрел
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onHide(item.id)}>
                     <EyeOff className="size-4" />

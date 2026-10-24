@@ -15,6 +15,8 @@ export interface Item {
 export interface Settings {
   sound: boolean;
   omdbKey?: string;
+  /** Which list (by item type) the wheel draws from and the pool shows. */
+  activeList: ItemType;
 }
 
 export interface AppState {

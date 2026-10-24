@@ -1,4 +1,4 @@
-import { createEmptyState, STATE_VERSION } from "@/lib/items";
+import { createEmptyState, DEFAULT_LIST, STATE_VERSION } from "@/lib/items";
 import type { AppState, Item, ItemStatus, ItemType } from "@/types";
 
 const STORAGE_KEY = "kinokoltso.v1";
@@ -56,11 +56,14 @@ export function normalizeState(value: unknown): AppState | null {
     typeof settings?.omdbKey === "string" && settings.omdbKey.trim().length > 0
       ? settings.omdbKey.trim()
       : undefined;
+  const activeList = TYPES.includes(settings?.activeList as ItemType)
+    ? (settings?.activeList as ItemType)
+    : DEFAULT_LIST;
 
   return {
     version: STATE_VERSION,
     items,
-    settings: { sound, omdbKey },
+    settings: { sound, omdbKey, activeList },
     lastWinnerId: typeof record.lastWinnerId === "string" ? record.lastWinnerId : null,
   };
 }
@@ -107,7 +110,7 @@ export function readStateFile(file: File): Promise<AppState> {
       try {
         const parsed: unknown = JSON.parse(String(reader.result));
         const state = normalizeState(parsed);
-        if (!state) reject(new Error("Файл не похож на резервную копию Кинокольца"));
+        if (!state) reject(new Error("Файл не похож на резервную копию «Саша + Лера»"));
         else resolve(state);
       } catch {
         reject(new Error("Файл повреждён или это не JSON"));

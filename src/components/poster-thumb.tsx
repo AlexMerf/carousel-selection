@@ -9,9 +9,10 @@ interface PosterThumbProps {
   item: Item;
   className?: string;
   imgClassName?: string;
+  fallbackClassName?: string;
 }
 
-export function PosterThumb({ item, className, imgClassName }: PosterThumbProps) {
+export function PosterThumb({ item, className, imgClassName, fallbackClassName }: PosterThumbProps) {
   const [failed, setFailed] = useState(false);
   const showImage = Boolean(item.posterUrl) && !failed;
 
@@ -37,7 +38,7 @@ export function PosterThumb({ item, className, imgClassName }: PosterThumbProps)
             TYPE_GRADIENT[item.type],
           )}
         >
-          <span className="text-sm font-semibold tracking-wide text-white/80">
+          <span className={cn("text-sm font-semibold tracking-wide text-white/80", fallbackClassName)}>
             {posterFallbackInitials(item.title)}
           </span>
           {item.posterUrl ? <ImageOff className="size-3 text-white/40" /> : null}
