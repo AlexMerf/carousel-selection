@@ -463,7 +463,9 @@ function Reel({ items, pick, spinToken, onSpinStart, onWinner, className }: Stag
           })}
         </div>
 
-        <div className="pointer-events-none absolute inset-x-2 top-1/2 h-24 -translate-y-1/2 rounded-xl ring-1 ring-primary/20" />
+        {/* Reading line of the drum: exactly the card box, otherwise the ring
+            hangs a few pixels outside the card and looks like a stray frame. */}
+        <div className="pointer-events-none absolute inset-x-3 top-1/2 h-24 -translate-y-1/2 rounded-xl ring-1 ring-primary/25" />
         <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2">
           <div className="h-0 w-0 border-y-[8px] border-l-[10px] border-y-transparent border-l-primary" />
         </div>
